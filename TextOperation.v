@@ -5,7 +5,9 @@ Require Import
   Coq.Strings.String
   Coq.Lists.List.
 
-Import ListNotations.
+Local Notation "[ ]" := nil : list_scope.
+Local Notation "[ a ; .. ; b ]" := (a :: .. (b :: []) ..) : list_scope.
+(* Import ListNotations. *) (* in Coq 8.4 *)
 
 Inductive ListOperation (A : Type) : Type :=
   | EmptyOp  : ListOperation A
