@@ -25,6 +25,40 @@ Inductive ListOperationLength : ListOperation -> nat -> nat -> Prop :=
   | LengthInsert : forall a o n m, ListOperationLength o n m -> ListOperationLength (InsertOp a o) n (S m)
   | LengthDelete : forall o n m, ListOperationLength o n m -> ListOperationLength (DeleteOp o) (S n) m.
 
+Hint Constructors ListOperationLength.
+
+Fixpoint start_length (o : ListOperation) : nat :=
+  match o with
+  | EmptyOp       => 0
+  | RetainOp o'   => S (start_length o')
+  | InsertOp _ o' => start_length o'
+  | DeleteOp o'   => S (start_length o')
+  end.
+
+Fixpoint end_length (o : ListOperation) : nat :=
+  match o with
+  | EmptyOp       => 0
+  | RetainOp o'   => S (end_length o')
+  | InsertOp _ o' => S (end_length o')
+  | DeleteOp o'   => end_length o'
+  end.
+
+Lemma operation_length : forall o, ListOperationLength o (start_length o) (end_length o).
+Proof.
+  intros o. induction o; constructor; assumption.
+Qed.
+
+Lemma operation_length_deterministic : forall o n m n' m',
+  ListOperationLength o n m ->
+  ListOperationLength o n' m' ->
+  n = n' /\ m = m'.
+Proof with auto.
+  intros o. induction o; intros n m n' m' L1 L2; inversion L1; inversion L2; subst...
+    destruct (IHo _ _ _ _ H0 H4)...
+    destruct (IHo _ _ _ _ H3 H8)...
+    destruct (IHo _ _ _ _ H0 H4)...
+Qed.
+
 Fixpoint apply (o : ListOperation) (l : list A) : option (list A) :=
   match o, l with
   | EmptyOp,       []      => Some []
