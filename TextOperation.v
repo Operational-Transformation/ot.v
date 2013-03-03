@@ -323,6 +323,12 @@ Definition pair_map {A A' B B' : Type} (f : A -> A') (g : B -> B') (p : A * B) :
 Definition option_pair_map {A A' B B' : Type} (f : A -> A') (g : B -> B') (mp : option (A * B)) : option (A' * B') :=
   option_map (pair_map f g) mp.
 
+Lemma option_pair_map_None : forall A A' B B' (f : A -> A') (g : B -> B') mp,
+  option_pair_map f g mp = None <-> mp = None.
+Proof.
+  intros. unfold option_pair_map. apply option_map_None.
+Qed.
+
 Fixpoint transform (a : ListOperation) : ListOperation -> option (ListOperation * ListOperation) :=
   fix transform' (b : ListOperation) : option (ListOperation * ListOperation) :=
     match a, b with
@@ -331,10 +337,94 @@ Fixpoint transform (a : ListOperation) : ListOperation -> option (ListOperation 
     | _,             InsertOp c b' => option_pair_map RetainOp     (InsertOp c) (transform' b')
     | RetainOp a',   RetainOp b'   => option_pair_map RetainOp     RetainOp     (transform a' b')
     | DeleteOp a',   DeleteOp b'   => transform a' b'
-    | RetainOp a',   DeleteOp b'   => option_pair_map DeleteOp     (fun x => x) (transform a' b')
-    | DeleteOp a',   RetainOp b'   => option_pair_map (fun x => x) DeleteOp     (transform a' b')
+    | RetainOp a',   DeleteOp b'   => option_pair_map (fun x => x) DeleteOp     (transform a' b')
+    | DeleteOp a',   RetainOp b'   => option_pair_map DeleteOp     (fun x => x) (transform a' b')
     | _,             _             => None
     end.
+
+Lemma transform_length : forall a b,
+  start_length a = start_length b ->
+  exists a' b', transform a b = Some (pair a' b') /\
+                start_length a' = end_length b /\
+                start_length b' = end_length a /\
+                end_length a' = end_length b'.
+Proof with auto.
+  intros a. induction a; intros.
+  (* EmptyOp *)
+    induction b; inversion H.
+    (* EmptyOp *)
+      exists EmptyOp. exists EmptyOp...
+    (* InsertOp *)
+      destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
+      exists (RetainOp a'). exists (InsertOp a b').
+      simpl. fold (transform EmptyOp). rewrite P1, P2, P3, P4...
+  (* RetainOp *)
+    induction b; inversion H.
+    (* RetainOp *)
+      destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
+      exists (RetainOp a'). exists (RetainOp b').
+      simpl. rewrite P1, P2, P3, P4...
+    (* InsertOp *)
+      destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
+      exists (RetainOp a'). exists (InsertOp a0 b').
+      simpl. unfold transform. fold (transform (RetainOp a)). rewrite P1, P2, P3, P4...
+    (* DeleteOp *)
+      destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
+      exists a'. exists (DeleteOp b').
+      simpl. rewrite P1, P2, P3, P4...
+  (* InsertOp *)
+    destruct (IHa _ H) as [a' [b' [P1 [P2 [P3 P4]]]]].
+    exists (InsertOp a a'). exists (RetainOp b').
+    simpl. destruct b; rewrite P1, P2, P3, P4...
+  (* DeleteOp *)
+    induction b; inversion H.
+    (* RetainOp *)
+      destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
+      exists (DeleteOp a'). exists b'.
+      simpl. rewrite P1, P2, P3, P4...
+    (* InsertOp *)
+      destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
+      exists (RetainOp a'). exists (InsertOp a0 b').
+      simpl. unfold transform. fold (transform (DeleteOp a)). rewrite P1, P2, P3, P4...
+    (* DeleteOp *)
+      destruct (IHa _ H1) as [a' [b' P]].
+      exists a'. exists b'...
+Qed.
+
+Lemma transform_wrong_length : forall a b,
+  start_length a <> start_length b ->
+  transform a b = None.
+Proof with auto.
+  intros a. induction a; intros b E.
+  (* EmptyOp *)
+    induction b...
+    (* EmptyOp *)
+      contradiction E...
+    (* InsertOp *)
+      simpl. fold (transform EmptyOp). rewrite option_pair_map_None. apply IHb...
+  (* RetainOp *)
+    induction b...
+    (* RetainOp *)
+      simpl. rewrite option_pair_map_None. apply IHa.
+      intros Eq. apply E. simpl. rewrite Eq...
+    (* InsertOp *)
+      unfold transform. fold (transform (RetainOp a)). rewrite option_pair_map_None. apply IHb...
+    (* DeleteOp *)
+      simpl. rewrite option_pair_map_None. apply IHa.
+      intros Eq. apply E. simpl. rewrite Eq...
+  (* InsertOp *)
+    simpl. destruct b; rewrite IHa...
+  (* DeleteOp *)
+    induction b...
+    (* RetainOp *)
+      simpl. rewrite option_pair_map_None. apply IHa.
+      intros Eq. apply E. simpl. rewrite Eq...
+    (* InsertOp *)
+      unfold transform. fold (transform (DeleteOp a)). rewrite option_pair_map_None. apply IHb...
+    (* DeleteOp *)
+      simpl. apply IHa.
+      intros Eq. apply E. simpl. rewrite Eq...
+Qed.
 
 End TextOperation.
 
