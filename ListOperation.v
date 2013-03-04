@@ -258,6 +258,19 @@ Proof with auto.
     simpl. destruct b; simpl; rewrite option_map_None; apply IHa; assumption.
 Qed.
 
+Lemma compose_length' : forall a b ab,
+  compose a b = Some ab ->
+  end_length b = end_length ab.
+Proof with auto.
+  intros. set (La := operation_length a). set (Lb := operation_length b).
+  destruct (eq_nat_dec (end_length a) (start_length b)) as [e | e].
+  (* = *)
+    rewrite e in La. destruct (compose_length _ _ _ _ _ La Lb) as [ab_ [P1 P2]].
+    rewrite P1 in H. inversion H; subst. destruct (operation_length_comb _ _ _ P2) as [_ J]...
+  (* <> *)
+    apply compose_wrong_length in e. rewrite e in H. inversion H.
+Qed.
+
 Lemma compose_EmptyOp_left : forall b,
   start_length b = 0 ->
   compose EmptyOp b = Some b.
@@ -369,6 +382,54 @@ Proof with auto.
         rewrite apply_wrong_length...
 Qed.
 
+Lemma compose_InsertOp_right : forall a b c,
+  compose a (InsertOp c b) = option_map (InsertOp c) (compose a b).
+Proof with auto.
+  intros. induction a...
+  (* DeleteOp *)
+    unfold compose. fold (compose a). rewrite IHa. rewrite option_map_compose. simpl.
+    destruct b; rewrite option_map_compose...
+Qed.
+
+Lemma compose_addDeleteOp_right : forall a b,
+  compose a (addDeleteOp b) = compose a (DeleteOp b).
+Proof with auto.
+  intros a. induction a; intros b...
+    (* EmptyOp *)
+      induction b...
+      (* InsertOp *) simpl. fold (compose EmptyOp). rewrite IHb...
+    (* RetainOp *)
+      induction b...
+      (* InsertOp *)
+        unfold addDeleteOp. fold addDeleteOp.
+        unfold compose. fold (compose (RetainOp a)). fold compose.
+        rewrite compose_InsertOp_right.
+        rewrite IHb. simpl. destruct (compose a b)...
+    (* InsertOp *)
+      induction b...
+      (* InsertOp *)
+        rename a into c. rename a0 into a.
+        unfold addDeleteOp. fold addDeleteOp.
+        unfold compose. fold (compose (InsertOp c a)). fold compose.
+        rewrite compose_InsertOp_right.
+        rewrite IHb. simpl. destruct (compose a b)...
+    (* DeleteOp *)
+      induction b...
+      (* InsertOp *)
+        unfold addDeleteOp. fold addDeleteOp.
+        unfold compose. fold (compose (DeleteOp a)). fold compose.
+        rewrite <- IHa...
+Qed.
+
+Lemma compose_RetainOp_addDeleteOp : forall a b c,
+  compose a b = Some c ->
+  compose (RetainOp a) (addDeleteOp b) = Some (addDeleteOp c).
+Proof with auto.
+  intros.
+  rewrite compose_addDeleteOp_right.
+  simpl. rewrite H...
+Qed.
+
 Definition pair_map {A A' B B' : Type} (f : A -> A') (g : B -> B') (p : A * B) : A' * B' :=
   pair (f (fst p)) (g (snd p)).
 
@@ -394,6 +455,73 @@ Fixpoint transform (a : ListOperation) : ListOperation -> option (ListOperation 
     | _,             _             => None
     end.
 
+Lemma transform_correct : forall a b,
+  start_length a = start_length b ->
+  exists a' b' c, transform a b = Some (pair a' b') /\
+                  compose a b' = Some c /\
+                  compose b a' = Some c.
+Proof with eauto.
+  intros a. induction a; intros.
+  (* EmptyOp *)
+    induction b; inversion H.
+    (* EmptyOp *)
+      exists EmptyOp. exists EmptyOp. exists EmptyOp...
+    (* InsertOp *)
+      destruct (IHb H) as [a' [b' [c [T [C1 C2]]]]].
+      exists (RetainOp a'). exists (InsertOp a b'). exists (InsertOp a c).
+      simpl. fold (transform EmptyOp). fold (compose EmptyOp).
+      rewrite T, C1, C2...
+  (* RetainOp *)
+    induction b; inversion H.
+    (* RetainOp *)
+      destruct (IHa _ H1) as [a' [b' [c [T [C1 C2]]]]].
+      exists (RetainOp a'). exists (RetainOp b'). exists (RetainOp c).
+      simpl. rewrite T, C1, C2...
+    (* InsertOp *)
+      rename a0 into ch.
+      destruct (IHb H) as [a' [b' [c [T [C1 C2]]]]].
+      exists (RetainOp a'). exists (InsertOp ch b'). exists (InsertOp ch c).
+      unfold transform. fold (transform (RetainOp a)). unfold compose. fold (compose (RetainOp a)). fold compose.
+      rewrite T, C1, C2...
+    (* DeleteOp *)
+      destruct (IHa _ H1) as [a' [b' [c [T [C1 C2]]]]].
+      exists a'. exists (addDeleteOp b'). exists (addDeleteOp c).
+      split. simpl. rewrite T...
+      split.
+        apply compose_RetainOp_addDeleteOp...
+        simpl. destruct a'; rewrite C2...
+  (* InsertOp *)
+    rename a into ch. rename a0 into a.
+    destruct (IHa _ H) as [a' [b' [c [T [C1 C2]]]]].
+    exists (InsertOp ch a'). exists (RetainOp b'). exists (InsertOp ch c).
+    rewrite compose_InsertOp_right.
+    simpl. destruct b; rewrite T, C1, C2...
+  (* DeleteOp *)
+    induction b; inversion H.
+    (* RetainOp *)
+      destruct (IHa _ H1) as [a' [b' [c [T [C1 C2]]]]].
+      exists (addDeleteOp a'). exists b'. exists (addDeleteOp c).
+      split. simpl. rewrite T...
+      split.
+        simpl. destruct b'; rewrite C1...
+        apply compose_RetainOp_addDeleteOp...
+    (* InsertOp *)
+      rename a0 into ch.
+      destruct (IHb H) as [a' [b' [c [T [C1 C2]]]]].
+      exists (RetainOp a'). exists (InsertOp ch b'). exists (InsertOp ch c).
+      unfold transform. fold (transform (DeleteOp a)). unfold compose. fold compose.
+      rewrite T, C2. split... split...
+        rewrite compose_InsertOp_right.
+        replace (Some (InsertOp ch c)) with (option_map (InsertOp ch) (Some c)) by reflexivity.
+        rewrite <- C1. simpl. destruct b'; do 2 rewrite option_map_compose...
+    (* DeleteOp *)
+      destruct (IHa _ H1) as [a' [b' [c [T [C1 C2]]]]].
+      exists a'. exists b'. exists (addDeleteOp c).
+      simpl. split... split.
+        destruct b'; rewrite C1...
+        destruct a'; rewrite C2...
+Qed.
+
 Lemma transform_length : forall a b,
   start_length a = start_length b ->
   exists a' b', transform a b = Some (pair a' b') /\
@@ -401,48 +529,17 @@ Lemma transform_length : forall a b,
                 start_length b' = end_length a /\
                 end_length a' = end_length b'.
 Proof with auto.
-  intros a. induction a; intros.
-  (* EmptyOp *)
-    induction b; inversion H.
-    (* EmptyOp *)
-      exists EmptyOp. exists EmptyOp...
-    (* InsertOp *)
-      destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists (RetainOp a'). exists (InsertOp a b').
-      simpl. fold (transform EmptyOp). rewrite P1, P2, P3, P4...
-  (* RetainOp *)
-    induction b; inversion H.
-    (* RetainOp *)
-      destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists (RetainOp a'). exists (RetainOp b').
-      simpl. rewrite P1, P2, P3, P4...
-    (* InsertOp *)
-      destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists (RetainOp a'). exists (InsertOp a0 b').
-      simpl. unfold transform. fold (transform (RetainOp a)). rewrite P1, P2, P3, P4...
-    (* DeleteOp *)
-      destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists a'. exists (addDeleteOp b').
-      simpl. rewrite start_length_addDeleteOp. rewrite end_length_addDeleteOp.
-      rewrite P1, P2, P3, P4...
-  (* InsertOp *)
-    destruct (IHa _ H) as [a' [b' [P1 [P2 [P3 P4]]]]].
-    exists (InsertOp a a'). exists (RetainOp b').
-    simpl. destruct b; rewrite P1, P2, P3, P4...
-  (* DeleteOp *)
-    induction b; inversion H.
-    (* RetainOp *)
-      destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists (addDeleteOp a'). exists b'.
-      simpl. rewrite start_length_addDeleteOp. rewrite end_length_addDeleteOp.
-      rewrite P1, P2, P3, P4...
-    (* InsertOp *)
-      destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists (RetainOp a'). exists (InsertOp a0 b').
-      simpl. unfold transform. fold (transform (DeleteOp a)). rewrite P1, P2, P3, P4...
-    (* DeleteOp *)
-      destruct (IHa _ H1) as [a' [b' P]].
-      exists a'. exists b'...
+  intros a b E. destruct (transform_correct a b E) as [a' [b' [c [T [C1 C2]]]]].
+  exists a'. exists b'.
+  assert (start_length a' = end_length b).
+    destruct (eq_nat_dec (start_length a') (end_length b))...
+    apply not_eq_sym in n. apply compose_wrong_length in n. rewrite n in C2. inversion C2.
+  assert (start_length b' = end_length a).
+    destruct (eq_nat_dec (start_length b') (end_length a))...
+    apply not_eq_sym in n. apply compose_wrong_length in n. rewrite n in C1. inversion C1.
+  split; [| split; [| split]]...
+    apply compose_length' in C1. rewrite C1.
+    apply compose_length' in C2. rewrite C2...
 Qed.
 
 Lemma transform_wrong_length : forall a b,
