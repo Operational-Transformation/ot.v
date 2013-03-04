@@ -28,6 +28,12 @@ Inductive ListOperationLength : ListOperation -> nat -> nat -> Prop :=
 
 Hint Constructors ListOperationLength.
 
+Fixpoint addDeleteOp (o : ListOperation) : ListOperation :=
+  match o with
+  | InsertOp i o' => InsertOp i (addDeleteOp o')
+  | _             => DeleteOp o
+  end.
+
 Fixpoint start_length (o : ListOperation) : nat :=
   match o with
   | EmptyOp       => 0
@@ -67,6 +73,33 @@ Proof.
   intros o m n H.
   assert (ListOperationLength o (start_length o) (end_length o)) as H' by apply operation_length.
   apply (operation_length_deterministic _ _ _ _ _ H H').
+Qed.
+
+Lemma start_length_addDeleteOp : forall o,
+  start_length (addDeleteOp o) = S (start_length o).
+Proof with auto.
+  intros o. induction o...
+Qed.
+
+Lemma end_length_addDeleteOp : forall o,
+  end_length (addDeleteOp o) = end_length o.
+Proof with auto.
+  intros o. induction o...
+  (* InsertOp *) simpl. rewrite IHo...
+Qed.
+
+Lemma ListOperationLength_addDeleteOp : forall o m n,
+  ListOperationLength (addDeleteOp o) m n <-> ListOperationLength (DeleteOp o) m n.
+Proof.
+  intros. split; intros L.
+  (* -> *)
+    destruct (operation_length_comb _ _ _ L) as [M N]; subst...
+    rewrite start_length_addDeleteOp. rewrite end_length_addDeleteOp.
+    constructor. apply operation_length.
+  (* <- *)
+    destruct (operation_length_comb _ _ _ L) as [M N]; subst. simpl.
+    rewrite <- start_length_addDeleteOp. rewrite <- end_length_addDeleteOp.
+    apply operation_length.
 Qed.
 
 Fixpoint apply (o : ListOperation) (l : list A) : option (list A) :=
@@ -121,14 +154,22 @@ Proof with auto.
     simpl. apply IHo. intros Eq. apply H. simpl. rewrite Eq. reflexivity.
 Qed.
 
+Lemma apply_addDeleteOp : forall (o : ListOperation) (l : list A),
+  apply (addDeleteOp o) l = apply (DeleteOp o) l.
+Proof with auto.
+  intros. induction o...
+  (* InsertOp *)
+    simpl. rewrite IHo. destruct l as [| x xs]...
+Qed.
+
 Fixpoint compose (a : ListOperation) : ListOperation -> option ListOperation :=
   fix compose' (b : ListOperation) : option (ListOperation) :=
     match a, b with
     | EmptyOp,       EmptyOp       => Some (EmptyOp)
-    | DeleteOp a',   _             => option_map DeleteOp     (compose a' b)
+    | DeleteOp a',   _             => option_map addDeleteOp  (compose a' b)
     | _,             InsertOp c b' => option_map (InsertOp c) (compose' b')
     | RetainOp a',   RetainOp b'   => option_map RetainOp     (compose a' b')
-    | RetainOp a',   DeleteOp b'   => option_map DeleteOp     (compose a' b')
+    | RetainOp a',   DeleteOp b'   => option_map addDeleteOp  (compose a' b')
     | InsertOp c a', RetainOp b'   => option_map (InsertOp c) (compose a' b')
     | InsertOp _ a', DeleteOp b'   => compose a' b'
     | _,             _             => None
@@ -159,7 +200,9 @@ Proof with auto.
       exists (InsertOp a0 ab'). split... unfold compose. fold (compose (RetainOp a)). rewrite P...
     (* DeleteOp *)
       inversion H0; subst. destruct (IHa _ _ _ _ (operation_length a) H2) as [ab' [P Q]].
-      exists (DeleteOp ab'). split... simpl. rewrite P...
+      exists (addDeleteOp ab'). split.
+        simpl. rewrite P...
+        apply ListOperationLength_addDeleteOp...
   (* InsertOp *)
     rename a into c. rename a0 into a.
     apply operation_length_comb in H; simpl in H; destruct H; subst.
@@ -175,7 +218,9 @@ Proof with auto.
       exists ab'...
   (* DeleteOp *)
     inversion H; subst. destruct (IHa _ _ _ _ H2 H0) as [ab' [P Q]].
-    exists (DeleteOp ab'). split... unfold compose. fold compose. destruct b; rewrite P...
+    exists (addDeleteOp ab'). split.
+      unfold compose. fold compose. destruct b; rewrite P...
+      apply ListOperationLength_addDeleteOp...
 Qed.
 
 Lemma compose_wrong_length : forall a b,
@@ -226,7 +271,9 @@ Lemma compose_EmptyOp_right : forall a,
   compose a EmptyOp = Some a.
 Proof with auto.
   intros a. induction a; intros H; inversion H...
-  (* DeleteOp *) unfold compose. fold compose. rewrite IHa...
+  (* DeleteOp *)
+    unfold compose. fold compose. rewrite IHa... simpl.
+    destruct a; inversion H1...
 Qed.
 
 Definition option_join {T} (m : option (option T)) : option T :=
@@ -276,7 +323,8 @@ Proof with auto.
         (* DeleteOp *)
           unfold compose. fold compose.
           simpl. do 2 rewrite option_map_compose.
-          rewrite IHa...
+          rewrite IHa... destruct (compose a b)...
+          simpl. rewrite apply_addDeleteOp...
       (* InsertOp *)
         rename a into c. rename a0 into a.
         induction b; intros; inversion e.
@@ -298,7 +346,11 @@ Proof with auto.
       (* DeleteOp *)
         destruct l as [| x xs]. inversion e0.
         simpl. rewrite IHa...
-        destruct b; rewrite option_map_compose; reflexivity.
+        replace ((fix compose' (b0 : ListOperation) : option ListOperation :=
+            option_map addDeleteOp (compose a b0)) b) with (option_map addDeleteOp (compose a b)).
+        rewrite option_map_compose. destruct (compose a b)...
+        simpl. rewrite apply_addDeleteOp...
+        (* replace *) destruct b...
   (* length l <> start_length a *)
     apply not_eq_sym in e0. rewrite (apply_wrong_length a l)...
     set (La := operation_length a). rewrite e in La.
@@ -337,8 +389,8 @@ Fixpoint transform (a : ListOperation) : ListOperation -> option (ListOperation 
     | _,             InsertOp c b' => option_pair_map RetainOp     (InsertOp c) (transform' b')
     | RetainOp a',   RetainOp b'   => option_pair_map RetainOp     RetainOp     (transform a' b')
     | DeleteOp a',   DeleteOp b'   => transform a' b'
-    | RetainOp a',   DeleteOp b'   => option_pair_map (fun x => x) DeleteOp     (transform a' b')
-    | DeleteOp a',   RetainOp b'   => option_pair_map DeleteOp     (fun x => x) (transform a' b')
+    | RetainOp a',   DeleteOp b'   => option_pair_map (fun x => x) addDeleteOp  (transform a' b')
+    | DeleteOp a',   RetainOp b'   => option_pair_map addDeleteOp  (fun x => x) (transform a' b')
     | _,             _             => None
     end.
 
@@ -370,8 +422,9 @@ Proof with auto.
       simpl. unfold transform. fold (transform (RetainOp a)). rewrite P1, P2, P3, P4...
     (* DeleteOp *)
       destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists a'. exists (DeleteOp b').
-      simpl. rewrite P1, P2, P3, P4...
+      exists a'. exists (addDeleteOp b').
+      simpl. rewrite start_length_addDeleteOp. rewrite end_length_addDeleteOp.
+      rewrite P1, P2, P3, P4...
   (* InsertOp *)
     destruct (IHa _ H) as [a' [b' [P1 [P2 [P3 P4]]]]].
     exists (InsertOp a a'). exists (RetainOp b').
@@ -380,8 +433,9 @@ Proof with auto.
     induction b; inversion H.
     (* RetainOp *)
       destruct (IHa _ H1) as [a' [b' [P1 [P2 [P3 P4]]]]].
-      exists (DeleteOp a'). exists b'.
-      simpl. rewrite P1, P2, P3, P4...
+      exists (addDeleteOp a'). exists b'.
+      simpl. rewrite start_length_addDeleteOp. rewrite end_length_addDeleteOp.
+      rewrite P1, P2, P3, P4...
     (* InsertOp *)
       destruct (IHb H) as [a' [b' [P1 [P2 [P3 P4]]]]].
       exists (RetainOp a'). exists (InsertOp a0 b').
