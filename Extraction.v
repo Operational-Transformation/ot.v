@@ -1,4 +1,4 @@
-Require Import TextOperation.
+Require Import ListOperation.
 Extraction Language Haskell.
 
 Extract Inductive list => "[]" [ "[]" "(:)" ].
@@ -12,8 +12,8 @@ Extraction Inline fst snd.
 Extract Inductive Datatypes.nat => "Prelude.Int" ["0" "Prelude.succ"]
   "(\fO fS n -> if n==0 then fO () else fS (n-1))".
 
-Extraction "TextOperation.hs"
-  TextOperation.ListOperation
-  TextOperation.apply
-  TextOperation.compose
-  TextOperation.transform.
+Extraction "ListOperation.hs"
+  ListOperation.ListOperation
+  ListOperation.apply
+  ListOperation.compose
+  ListOperation.transform.

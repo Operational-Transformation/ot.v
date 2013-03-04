@@ -1,4 +1,4 @@
-Module TextOperation.
+Module ListOperation.
 
 Require Import
   Coq.Strings.Ascii
@@ -6,7 +6,7 @@ Require Import
   Coq.Arith.Peano_dec
   Coq.Lists.List.
 
-Section TextOperation.
+Section ListOperation.
 
 Variable A : Type.
 
@@ -426,6 +426,6 @@ Proof with auto.
       intros Eq. apply E. simpl. rewrite Eq...
 Qed.
 
-End TextOperation.
+End ListOperation.
 
-End TextOperation.
+End ListOperation.
