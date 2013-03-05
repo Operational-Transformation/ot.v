@@ -162,6 +162,60 @@ Proof with auto.
     simpl. rewrite IHo. destruct l as [| x xs]...
 Qed.
 
+Fixpoint normalize (o : ListOperation) : ListOperation :=
+  match o with
+  | EmptyOp       => EmptyOp
+  | RetainOp o'   => RetainOp (normalize o')
+  | InsertOp c o' => InsertOp c (normalize o')
+  | DeleteOp o'   => addDeleteOp (normalize o')
+  end.
+
+Lemma normalize_apply : forall o l, apply o l = apply (normalize o) l.
+Proof with auto.
+  intros o. induction o; intros l...
+    (* RetainOp *) simpl. destruct l... rewrite IHo...
+    (* InsertOp *) simpl. rewrite IHo...
+    (* DeleteOp *)
+      unfold normalize. fold normalize. rewrite apply_addDeleteOp.
+      destruct l... simpl. rewrite IHo...
+Qed.
+
+Lemma normalize_addDeleteOp : forall (o : ListOperation),
+  normalize (addDeleteOp o) = addDeleteOp (normalize o).
+Proof with auto.
+  intros o. induction o...
+  (* InsertOp *)
+    simpl. rewrite IHo...
+Qed.
+
+Lemma normalize_idempotent : forall o, normalize o = normalize (normalize o).
+Proof with auto.
+  intros o. induction o; simpl; try rewrite <- IHo...
+  (* DeleteOp *)
+    rewrite normalize_addDeleteOp. rewrite <- IHo...
+Qed.
+
+Definition normalized (o : ListOperation) : Prop := normalize o = o.
+
+Hint Unfold normalized.
+
+Lemma normalized_EmptyOp : normalized EmptyOp.
+Proof. auto. Qed.
+
+Lemma normalized_RetainOp : forall o,
+  normalized o -> normalized (RetainOp o).
+Proof. intros o H. unfold normalized in *. simpl. rewrite H. reflexivity. Qed.
+
+Lemma normalized_InsertOp : forall o c,
+  normalized o -> normalized (InsertOp c o).
+Proof. intros o c H. unfold normalized in *. simpl. rewrite H. reflexivity. Qed.
+
+Lemma normalized_addDeleteOp : forall o,
+  normalized o -> normalized (addDeleteOp o).
+Proof.
+  intros o H. unfold normalized in *. rewrite normalize_addDeleteOp. rewrite H. reflexivity.
+Qed.
+
 Fixpoint compose (a : ListOperation) : ListOperation -> option ListOperation :=
   fix compose' (b : ListOperation) : option (ListOperation) :=
     match a, b with
@@ -256,6 +310,52 @@ Proof with auto.
       intros Eq. apply H. simpl. rewrite Eq...
   (* DeleteOp *)
     simpl. destruct b; simpl; rewrite option_map_None; apply IHa; assumption.
+Qed.
+
+Lemma compose_normalized : forall a b c,
+  compose a b = Some c ->
+  normalized c.
+Proof with auto.
+  intros a. induction a; intros b.
+  (* EmptyOp *)
+    induction b; intros c H; try solve [inversion H]...
+    (* EmptyOp *) inversion H...
+    (* InsertOp *)
+      rename a into ch. replace (compose EmptyOp (InsertOp ch b))
+        with (option_map (InsertOp ch) (compose EmptyOp b)) in H by reflexivity.
+      destruct (compose EmptyOp b); inversion H.
+        apply normalized_InsertOp. apply IHb...
+  (* RetainOp *)
+    induction b; intros c H; try solve [inversion H]...
+    (* RetainOp *)
+      simpl in H. remember (compose a b) as ab. destruct ab; subst; inversion H.
+      apply normalized_RetainOp. symmetry in Heqab. eapply IHa. apply Heqab.
+    (* InsertOp *)
+      rename a0 into ch. replace (compose (RetainOp a) (InsertOp ch b))
+        with (option_map (InsertOp ch) (compose (RetainOp a) b)) in H by reflexivity.
+      destruct (compose (RetainOp a) b); inversion H.
+        apply normalized_InsertOp. apply IHb...
+    (* DeleteOp *)
+      simpl in H. remember (compose a b) as ab. destruct ab; inversion H.
+        apply normalized_addDeleteOp. symmetry in Heqab. eapply IHa. apply Heqab.
+  (* InsertOp *)
+    rename a into ch. rename a0 into a.
+    induction b; intros c H; try solve [inversion H]...
+      (* RetainOp *)
+        simpl in H. remember (compose a b) as ab. destruct ab; inversion H.
+          apply normalized_InsertOp. symmetry in Heqab. eapply IHa. apply Heqab.
+      (* InsertOp *)
+        rename a0 into ch'. replace (compose (InsertOp ch a) (InsertOp ch' b))
+          with (option_map (InsertOp ch') (compose (InsertOp ch a) b)) in H by reflexivity.
+        destruct (compose (InsertOp ch a) b); inversion H.
+          apply normalized_InsertOp. apply IHb...
+      (* DeleteOp *)
+        simpl in H. eapply IHa. apply H.
+  (* DeleteOp *)
+    intros c H. replace (compose (DeleteOp a) b)
+      with (option_map addDeleteOp (compose a b)) in H by (destruct b; auto).
+    remember (compose a b) as ab. destruct ab; inversion H.
+      apply normalized_addDeleteOp. symmetry in Heqab. eapply IHa. apply Heqab.
 Qed.
 
 Lemma compose_length' : forall a b ab,
