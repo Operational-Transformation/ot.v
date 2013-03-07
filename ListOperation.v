@@ -229,6 +229,12 @@ Fixpoint compose (a : ListOperation) : ListOperation -> option ListOperation :=
     | _,             _             => None
     end.
 
+Lemma compose_DeleteOp_left : forall a b,
+  compose (DeleteOp a) b = option_map addDeleteOp (compose a b).
+Proof.
+  intros. simpl. destruct b; auto.
+Qed.
+
 Lemma compose_length : forall (a : ListOperation) (b : ListOperation) m n o,
   ListOperationLength a m n ->
   ListOperationLength b n o ->
@@ -309,7 +315,7 @@ Proof with auto.
       simpl. apply IHa.
       intros Eq. apply H. simpl. rewrite Eq...
   (* DeleteOp *)
-    simpl. destruct b; simpl; rewrite option_map_None; apply IHa; assumption.
+    rewrite compose_DeleteOp_left. rewrite option_map_None. apply IHa...
 Qed.
 
 Lemma compose_normalized : forall a b c,
@@ -352,21 +358,20 @@ Proof with auto.
       (* DeleteOp *)
         simpl in H. eapply IHa. apply H.
   (* DeleteOp *)
-    intros c H. replace (compose (DeleteOp a) b)
-      with (option_map addDeleteOp (compose a b)) in H by (destruct b; auto).
+    intros c H. rewrite compose_DeleteOp_left in H.
     remember (compose a b) as ab. destruct ab; inversion H.
       apply normalized_addDeleteOp. symmetry in Heqab. eapply IHa. apply Heqab.
 Qed.
 
 Lemma compose_length' : forall a b ab,
   compose a b = Some ab ->
-  end_length b = end_length ab.
+  start_length a = start_length ab /\ end_length b = end_length ab.
 Proof with auto.
   intros. set (La := operation_length a). set (Lb := operation_length b).
   destruct (eq_nat_dec (end_length a) (start_length b)) as [e | e].
   (* = *)
     rewrite e in La. destruct (compose_length _ _ _ _ _ La Lb) as [ab_ [P1 P2]].
-    rewrite P1 in H. inversion H; subst. destruct (operation_length_comb _ _ _ P2) as [_ J]...
+    rewrite P1 in H. inversion H; subst. destruct (operation_length_comb _ _ _ P2) as [J K]...
   (* <> *)
     apply compose_wrong_length in e. rewrite e in H. inversion H.
 Qed.
@@ -385,7 +390,7 @@ Lemma compose_EmptyOp_right : forall a,
 Proof with auto.
   intros a. induction a; intros H; inversion H...
   (* DeleteOp *)
-    unfold compose. fold compose. rewrite IHa... simpl.
+    rewrite compose_DeleteOp_left. rewrite IHa... simpl.
     destruct a; inversion H1...
 Qed.
 
@@ -458,12 +463,9 @@ Proof with auto.
           rewrite IHa...
       (* DeleteOp *)
         destruct l as [| x xs]. inversion e0.
-        simpl. rewrite IHa...
-        replace ((fix compose' (b0 : ListOperation) : option ListOperation :=
-            option_map addDeleteOp (compose a b0)) b) with (option_map addDeleteOp (compose a b)).
+        rewrite compose_DeleteOp_left. simpl. rewrite IHa...
         rewrite option_map_compose. destruct (compose a b)...
         simpl. rewrite apply_addDeleteOp...
-        (* replace *) destruct b...
   (* length l <> start_length a *)
     apply not_eq_sym in e0. rewrite (apply_wrong_length a l)...
     set (La := operation_length a). rewrite e in La.
@@ -487,8 +489,8 @@ Lemma compose_InsertOp_right : forall a b c,
 Proof with auto.
   intros. induction a...
   (* DeleteOp *)
-    unfold compose. fold (compose a). rewrite IHa. rewrite option_map_compose. simpl.
-    destruct b; rewrite option_map_compose...
+    do 2 rewrite compose_DeleteOp_left. rewrite IHa.
+    rewrite option_map_compose. simpl. rewrite option_map_compose...
 Qed.
 
 Lemma compose_addDeleteOp_right : forall a b,
@@ -521,13 +523,170 @@ Proof with auto.
         rewrite <- IHa...
 Qed.
 
-Lemma compose_RetainOp_addDeleteOp : forall a b c,
-  compose a b = Some c ->
-  compose (RetainOp a) (addDeleteOp b) = Some (addDeleteOp c).
+Lemma compose_addDeleteOp_left : forall a b,
+  compose (addDeleteOp a) b = option_map addDeleteOp (compose a b).
 Proof with auto.
-  intros.
-  rewrite compose_addDeleteOp_right.
-  simpl. rewrite H...
+  intros a. induction a; intros; unfold addDeleteOp; fold addDeleteOp; try rewrite compose_DeleteOp_left...
+  (* InsertOp *)
+    induction b...
+    (* RetainOp *)
+      simpl. rewrite IHa. do 2 rewrite option_map_compose...
+    (* InsertOp *)
+      do 2 rewrite compose_InsertOp_right. rewrite IHb. do 2 rewrite option_map_compose...
+    (* DeleteOp *)
+      simpl. apply IHa.
+Qed.
+
+Lemma compose_RetainOp_addDeleteOp : forall a b,
+  compose (RetainOp a) (addDeleteOp b) = option_map addDeleteOp (compose a b).
+Proof.
+  intros. rewrite compose_addDeleteOp_right. auto.
+Qed.
+
+Lemma compose_InsertOp_addDeleteOp : forall a b ch,
+  compose (InsertOp ch a) (addDeleteOp b) = compose a b.
+Proof.
+  intros. rewrite compose_addDeleteOp_right. auto.
+Qed.
+
+Lemma option_map_helper : forall (A B C : Type) (f : A -> option C) (g : B -> C) (h : A -> option B) (o : option A),
+  (forall x, f x = option_map g (h x)) ->
+  option_join (option_map f o) = option_map g (option_join (option_map h o)).
+Proof with auto.
+  intros. destruct o... simpl. apply H.
+Qed.
+
+Lemma compose_assoc : forall a b c,
+  option_join (option_map (compose a) (compose b c)) =
+  option_join (option_map (fun x => compose x c) (compose a b)).
+Proof with auto.
+  assert (forall o1 o2 ch, option_join (option_map (fun x => compose x (InsertOp ch o2)) o1) =
+                           option_map (InsertOp ch) (option_join (option_map (fun x => compose x o2) o1))) as Helper1.
+    intros. apply option_map_helper. intros. apply compose_InsertOp_right.
+  assert (forall o1 o2 ch, option_join (option_map (fun x => compose o1 (InsertOp ch x)) o2) =
+                           option_map (InsertOp ch) (option_join (option_map (compose o1) o2))) as Helper1'.
+    intros. apply option_map_helper. intros. apply compose_InsertOp_right.
+  assert (forall o1 o2 ch ch2, option_join (option_map (fun x => compose (InsertOp ch x) (InsertOp ch2 o2)) o1) =
+                           option_map (InsertOp ch2) (option_join (option_map (fun x => compose (InsertOp ch x) o2) o1))) as Helper1''.
+    intros. apply option_map_helper. intros. apply compose_InsertOp_right.
+  assert (forall o1 o2, option_join (option_map (compose (DeleteOp o1)) o2) =
+                        option_map addDeleteOp (option_join (option_map (compose o1) o2))) as Helper2.
+    intros. apply option_map_helper. intros. apply compose_DeleteOp_left.
+  assert (forall o1 o2, option_join (option_map (fun x => compose (addDeleteOp x) o2) o1) =
+                        option_map addDeleteOp (option_join (option_map (fun x => compose x o2) o1))) as Helper3.
+    intros. apply option_map_helper. intros. apply compose_addDeleteOp_left.
+  assert (forall o1 o2, option_join (option_map (fun x => compose (RetainOp o1) (addDeleteOp x)) o2) =
+                        option_map addDeleteOp (option_join (option_map (compose o1) o2))) as Helper4.
+    intros. apply option_map_helper. intros. rewrite compose_RetainOp_addDeleteOp...
+  assert (forall o1 o2, option_join (option_map (fun x => compose (RetainOp x) (DeleteOp o2)) o1) =
+                        option_map addDeleteOp (option_join (option_map (fun x => compose x o2) o1))) as Helper4'.
+    intros. apply option_map_helper. intros...
+  assert (forall o1 o2 ch, option_join (option_map (fun x => compose (InsertOp ch x) (DeleteOp o2)) o1) =
+                        option_join (option_map (fun x => compose x o2) o1)) as Helper5.
+    intros. destruct o1...
+  assert (forall o1 o2 ch, option_join (option_map (fun x => compose (InsertOp ch o1) (addDeleteOp x)) o2) = option_join (option_map (fun x => compose o1 x) o2)) as Helper6.
+    intros. destruct o2... unfold option_map. rewrite compose_InsertOp_addDeleteOp...
+  assert (forall o1 o2, option_join (option_map (compose (DeleteOp o1)) o2) =
+                        option_map addDeleteOp (option_join (option_map (compose o1) o2))) as Helper7.
+    intros. apply option_map_helper. intros. apply compose_DeleteOp_left.
+  assert (forall o1 o2, option_join (option_map (fun x => compose (RetainOp o1) (DeleteOp x)) o2) =
+                        option_map addDeleteOp (option_join (option_map (compose o1) o2))) as Helper8.
+    intros. apply option_map_helper. intros...
+  assert (forall o1 o2 ch, option_join (option_map (fun x => compose (InsertOp ch o1) (DeleteOp x)) o2) = option_join (option_map (fun x => compose o1 x) o2)) as Helper9.
+     intros. destruct o2...
+  assert (forall o1 o2, option_join (option_map (fun x => compose (DeleteOp o1) (DeleteOp x)) o2) = option_map addDeleteOp (option_join (option_map (fun x => compose o1 (DeleteOp x)) o2))) as Helper10.
+    intros. destruct o2...
+  (*
+  assert (forall o1 o2, option_join (option_map (fun x => compose x (DeleteOp o2)) o1) =
+                        option_map addDeleteOp (option_join (option_map (fun x => compose x o2) o1))) as Helper4.
+    intros. destruct o1... simpl. apply compose_DeleteOp_right.
+  *)
+  intros a b c.
+  destruct (eq_nat_dec (end_length a) (start_length b)) as [e | e].
+  (* end_length a = start_length b *)
+    destruct (eq_nat_dec (end_length b) (start_length c)) as [e0 | e0].
+    (* length l = start_length a *)
+      generalize dependent a. generalize dependent c. induction b; intros.
+      (* EmptyOp *)
+        rewrite (compose_EmptyOp_left c (eq_sym e0)).
+        rewrite (compose_EmptyOp_right a e)...
+      (* RetainOp *)
+        generalize dependent a. induction c; intros.
+        (* EmptyOp *) inversion e0.
+        (* RetainOp *)
+          induction a...
+          (* EmptyOp *) inversion e.
+          (* RetainOp *)
+            simpl. do 2 rewrite option_map_compose. simpl. do 2 rewrite <- option_map_join.
+            rewrite IHb...
+          (* InsertOp *)
+            replace (compose (RetainOp b) (RetainOp c)) with (option_map RetainOp (compose b c))...
+            replace (compose (InsertOp a a0) (RetainOp b)) with (option_map (InsertOp a) (compose a0 b))...
+            do 2 rewrite option_map_compose. simpl. do 2 rewrite <- option_map_join.
+            rewrite IHb...
+          (* DeleteOp *)
+            replace (compose (RetainOp b) (RetainOp c)) with (option_map RetainOp (compose b c))...
+            rewrite Helper2. rewrite compose_DeleteOp_left. do 2 rewrite option_map_compose.
+            rewrite Helper3. rewrite <- IHa...
+            simpl. rewrite option_map_compose...
+        (* InsertOp *)
+          rewrite compose_InsertOp_right. rewrite Helper1.
+          rewrite option_map_compose. rewrite Helper1'.
+          rewrite <- IHc...
+        (* DeleteOp *)
+          induction a...
+          (* EmptyOp *) inversion e.
+          (* RetainOp *)
+            replace (compose (RetainOp a) (RetainOp b)) with (option_map RetainOp (compose a b))...
+            replace (compose (RetainOp b) (DeleteOp c)) with (option_map addDeleteOp (compose b c))...
+            do 2 rewrite option_map_compose. rewrite Helper4. rewrite Helper4'. rewrite IHb...
+          (* InsertOp *)
+            replace (compose (RetainOp b) (DeleteOp c)) with (option_map addDeleteOp (compose b c))...
+            replace (compose (InsertOp a a0) (RetainOp b)) with (option_map (InsertOp a) (compose a0 b))...
+            do 2 rewrite option_map_compose.
+            rewrite Helper5. rewrite Helper6. rewrite IHb...
+          (* DeleteOp *)
+            rewrite Helper7. rewrite IHa...
+            replace (compose (DeleteOp a) (RetainOp b)) with (option_map addDeleteOp (compose a (RetainOp b)))...
+            rewrite option_map_compose. rewrite Helper3...
+      (* InsertOp *)
+        rewrite compose_InsertOp_right. rewrite option_map_compose. induction c...
+        (* EmptyOp *) inversion e0.
+        (* RetainOp *)
+          simpl. rewrite option_map_compose. rewrite <- option_map_join. rewrite Helper1'.
+          rewrite IHb...
+        (* InsertOp *)
+          rewrite compose_InsertOp_right. rewrite option_map_compose. rewrite Helper1'.
+          rewrite Helper1''. rewrite IHc...
+        (* DeleteOp *)
+          replace (compose (InsertOp a b) (DeleteOp c)) with (compose b c)...
+          rewrite Helper5. apply IHb...
+      (* DeleteOp *)
+        rewrite compose_DeleteOp_left. rewrite option_map_compose.
+        replace (option_join (option_map (fun x => compose a (addDeleteOp x)) (compose b c)))
+          with (option_join (option_map (fun x => compose a (DeleteOp x)) (compose b c))).
+        induction a...
+        (* EmptyOp *) inversion e.
+        (* RetainOp *)
+          replace (compose (RetainOp a) (DeleteOp b)) with (option_map addDeleteOp (compose a b))...
+          rewrite option_map_compose. rewrite Helper8. rewrite Helper3. rewrite IHb...
+        (* InsertOp *)
+          rewrite Helper9. simpl. rewrite IHb...
+        (* DeleteOp *)
+          rewrite compose_DeleteOp_left. rewrite option_map_compose.
+          rewrite Helper10. rewrite Helper3. rewrite IHa...
+        (* replace *)
+          destruct (compose b c)... simpl. symmetry. apply compose_addDeleteOp_right.
+    (* length l <> start_length a *)
+      rewrite (compose_wrong_length _ _ e0).
+      remember (compose a b) as ab. destruct ab...
+      symmetry in Heqab. destruct (compose_length' _ _ _ Heqab) as [_ HEndLength].
+      simpl. symmetry. apply compose_wrong_length. rewrite <- HEndLength...
+  (* end_length a <> start_length b *)
+    rewrite (compose_wrong_length _ _ e).
+    remember (compose b c) as bc. destruct bc...
+    symmetry in Heqbc. destruct (compose_length' _ _ _ Heqbc) as [HStartLength _].
+    simpl. apply compose_wrong_length. rewrite <- HStartLength...
 Qed.
 
 Definition pair_map {A A' B B' : Type} (f : A -> A') (g : B -> B') (p : A * B) : A' * B' :=
@@ -588,8 +747,8 @@ Proof with eauto.
       exists a'. exists (addDeleteOp b'). exists (addDeleteOp c).
       split. simpl. rewrite T...
       split.
-        apply compose_RetainOp_addDeleteOp...
-        simpl. destruct a'; rewrite C2...
+        rewrite compose_RetainOp_addDeleteOp. rewrite C1...
+        rewrite compose_DeleteOp_left. rewrite C2...
   (* InsertOp *)
     rename a into ch. rename a0 into a.
     destruct (IHa _ H) as [a' [b' [c [T [C1 C2]]]]].
@@ -604,7 +763,7 @@ Proof with eauto.
       split. simpl. rewrite T...
       split.
         simpl. destruct b'; rewrite C1...
-        apply compose_RetainOp_addDeleteOp...
+        rewrite compose_RetainOp_addDeleteOp. rewrite C2...
     (* InsertOp *)
       rename a0 into ch.
       destruct (IHb H) as [a' [b' [c [T [C1 C2]]]]].
@@ -638,8 +797,8 @@ Proof with auto.
     destruct (eq_nat_dec (start_length b') (end_length a))...
     apply not_eq_sym in n. apply compose_wrong_length in n. rewrite n in C1. inversion C1.
   split; [| split; [| split]]...
-    apply compose_length' in C1. rewrite C1.
-    apply compose_length' in C2. rewrite C2...
+    destruct (compose_length' _ _ _ C1) as [_ L1]. rewrite L1.
+    destruct (compose_length' _ _ _ C2) as [_ L2]. rewrite L2...
 Qed.
 
 Lemma transform_wrong_length : forall a b,
